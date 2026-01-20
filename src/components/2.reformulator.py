@@ -62,7 +62,7 @@ class LLMQueryReformulator(BaseQueryReformulator):
                 response_format={ "type": "json_object" }
             )
             
-            result = json.loads(response.choices[0].message.content) 3 # type: ignore
+            result = json.loads(response.choices[0].message.content) # type: ignore
             keywords = result.get("keywords", [])
             if len(keywords) > 6:
                 keywords = keywords[:6]
