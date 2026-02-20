@@ -5,6 +5,7 @@ from qdrant_client.http import models as rest
 from qdrant_client.http.models import Filter, FieldCondition, MatchText
 from openai import OpenAI
 import numpy as np
+import uuid
 from ..models import SearchResult, Document
 from ..config import Settings
 from .base_component import BaseComponent
@@ -31,9 +32,9 @@ class VectorRetriever(BaseRetriever):
         cache_ttl: int = 3600
     ):
         super().__init__()
-        settings = Settings() # type: ignore
+        settings = Settings()
         self.db_client = QdrantClient(url=url)
-        self.client = OpenAI(api_key=settings.openai_api_key)
+        self.openai_client = OpenAI(api_key=settings.openai_api_key)
         self.embedding_model = embedding_model
         self.collection_name = collection_name
         self.embedding_cache = MemoryCache(ttl=cache_ttl)
@@ -57,21 +58,20 @@ class VectorRetriever(BaseRetriever):
     
     def add_documents(self, documents: List[Document]) -> None:
         embeddings = [self._get_embedding(doc.text) for doc in documents]
-        
         # Prepare points for Qdrant
         points = [
             rest.PointStruct(
-                id=i,
+                id=str(uuid.uuid4()),
                 vector=embedding.tolist(),
                 payload={
                     "text": doc.text,
                     **(doc.metadata or {})
                 }
             )
-            for i, (doc, embedding) in enumerate(zip(documents, embeddings))
+            for doc, embedding in zip(documents, embeddings)
         ]
         
-        self.client.upsert(
+        self.db_client.upsert(
             collection_name=self.collection_name,
             points=points
         )
@@ -79,7 +79,7 @@ class VectorRetriever(BaseRetriever):
     def semantic_search(self, query: str, top_k: int = 5) -> List[SearchResult]:
         query_vector = self._get_embedding(query)
         
-        results = self.client.search(
+        results = self.db_client.search(
             collection_name=self.collection_name,
             query_vector=query_vector,
             limit=top_k
@@ -103,7 +103,7 @@ class VectorRetriever(BaseRetriever):
             for keyword in keywords
         ]
         
-        results = (self.client.scroll(
+        results = (self.db_client.scroll(
             collection_name=self.collection_name,
             scroll_filter=Filter(
                 should=keyword_conditions
@@ -122,19 +122,16 @@ class VectorRetriever(BaseRetriever):
         ]
     
     def _get_embedding(self, text: str) -> np.ndarray:
-        # Check cache first
         cached = self.embedding_cache.get(text)
         if cached is not None:
             return cached
         
-        # Generate embedding
         response = self.openai_client.embeddings.create(
             model=self.embedding_model,
             input=text
         )
         embedding = np.array(response.data[0].embedding)
         
-        # Cache for future use
         self.embedding_cache.set(text, embedding)
         return embedding
     
@@ -145,7 +142,6 @@ class VectorRetriever(BaseRetriever):
         semantic_weight = 0.7
         keyword_weight = 0.3
         
-        # Add semantic results with weight
         for result in semantic_results:
             merged[result.text] = SearchResult(
                 text=result.text,
@@ -153,10 +149,8 @@ class VectorRetriever(BaseRetriever):
                 score=result.score * semantic_weight
             )
         
-        # Combine with keyword results
         for result in keyword_results:
             if result.text in merged:
-                # Boost score if found in both
                 merged[result.text].score += result.score * keyword_weight
             else:
                 merged[result.text] = SearchResult(

@@ -23,9 +23,11 @@ class QueryCache:
         # Separate subdirectories for different cache types
         self.query_cache_dir = self.cache_dir / "queries"
         self.embedding_cache_dir = self.cache_dir / "embeddings"
+        self.reformulator_cache_dir = self.cache_dir / "reformulator"
         
         self.query_cache_dir.mkdir(exist_ok=True)
         self.embedding_cache_dir.mkdir(exist_ok=True)
+        self.reformulator_cache_dir.mkdir(exist_ok=True)
     
     def _get_cache_key(self, data: Any) -> str:
         """Generate cache key from data"""
@@ -43,9 +45,17 @@ class QueryCache:
         file_age = time.time() - file_path.stat().st_mtime
         return file_age > self.ttl
     
+    def _get_cache_dir(self, cache_type: str) -> Path:
+        """Get appropriate cache directory"""
+        if cache_type == "embedding":
+            return self.embedding_cache_dir
+        elif cache_type == "reformulator":
+            return self.reformulator_cache_dir
+        return self.query_cache_dir
+    
     def get(self, key: str, cache_type: str = "query") -> Optional[Any]:
         """Get cached value"""
-        cache_dir = self.query_cache_dir if cache_type == "query" else self.embedding_cache_dir
+        cache_dir = self._get_cache_dir(cache_type)
         cache_key = self._get_cache_key(key)
         cache_file = cache_dir / f"{cache_key}.pkl"
         
@@ -60,7 +70,7 @@ class QueryCache:
     
     def set(self, key: str, value: Any, cache_type: str = "query") -> None:
         """Set cached value"""
-        cache_dir = self.query_cache_dir if cache_type == "query" else self.embedding_cache_dir
+        cache_dir = self._get_cache_dir(cache_type)
         cache_key = self._get_cache_key(key)
         cache_file = cache_dir / f"{cache_key}.pkl"
         
@@ -72,12 +82,15 @@ class QueryCache:
     
     def clear(self, cache_type: Optional[str] = None) -> None:
         """Clear cache files"""
+        dirs = []
         if cache_type == "query":
             dirs = [self.query_cache_dir]
         elif cache_type == "embedding":
             dirs = [self.embedding_cache_dir]
+        elif cache_type == "reformulator":
+            dirs = [self.reformulator_cache_dir]
         else:
-            dirs = [self.query_cache_dir, self.embedding_cache_dir]
+            dirs = [self.query_cache_dir, self.embedding_cache_dir, self.reformulator_cache_dir]
         
         for cache_dir in dirs:
             for cache_file in cache_dir.glob("*.pkl"):
@@ -86,7 +99,7 @@ class QueryCache:
     def clear_expired(self) -> int:
         """Clear expired cache files and return count"""
         count = 0
-        for cache_dir in [self.query_cache_dir, self.embedding_cache_dir]:
+        for cache_dir in [self.query_cache_dir, self.embedding_cache_dir, self.reformulator_cache_dir]:
             for cache_file in cache_dir.glob("*.pkl"):
                 if self._is_expired(cache_file):
                     cache_file.unlink()

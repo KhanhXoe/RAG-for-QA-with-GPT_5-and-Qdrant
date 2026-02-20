@@ -5,7 +5,7 @@ from openai import OpenAI
 import json
 from .base_component import BaseComponent
 from ..config import Settings
-from ..utils.cache import MemoryCache
+from ..utils.cache import QueryCache
 
 @dataclass
 class ReformulatedQuery:
@@ -32,10 +32,10 @@ class LLMQueryReformulator(BaseQueryReformulator):
         settings = Settings() # type: ignore
         self.client = OpenAI(api_key=settings.openai_api_key)
         self.model = model
-        self.cache = MemoryCache(ttl=cache_ttl)
+        self.cache = QueryCache(ttl=cache_ttl)
 
     def reformulate(self, query: str) -> ReformulatedQuery:
-        cached = self.cache.get(query)
+        cached = self.cache.get(query, cache_type="reformulator")
         if cached is not None:
             return cached
         
@@ -47,7 +47,7 @@ class LLMQueryReformulator(BaseQueryReformulator):
             "keywords": ["key1", "key2", "key3"]
         }}
 
-        Only return the JSON object, no other text. The number of keywords should be between 2 and 6.
+        ONLY return the JSON object, NO other text. The number of keywords should be between 2 and 6.
 
         User Query: {query}"""
         
@@ -62,17 +62,21 @@ class LLMQueryReformulator(BaseQueryReformulator):
                 response_format={ "type": "json_object" }
             )
             
-            result = json.loads(response.choices[0].message.content) # type: ignore
+            result = json.loads(response.choices[0].message.content)
             keywords = result.get("keywords", [])
             if len(keywords) > 6:
                 keywords = keywords[:6]
             elif len(keywords) < 2:
                 keywords = query.split()[:6] 
             
-            return ReformulatedQuery(
+            final_result = ReformulatedQuery(
                 refined_text=result.get("refined_query", query),
                 keywords=keywords
             )
+            
+            self.cache.set(query, final_result, cache_type="reformulator")
+            return final_result
+            
         except Exception as e:
             print(f"Reformulator error: {e}")
             return ReformulatedQuery(
