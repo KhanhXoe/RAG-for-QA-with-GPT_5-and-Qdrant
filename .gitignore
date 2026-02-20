@@ -9,7 +9,7 @@ __pycache__/
 logs/*
 
 # Jupyter Notebooks
-*.ipynb
+test.ipynb
 
 # Test files
 test.py
